@@ -488,3 +488,67 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_lseek(void)
+{
+    int fd;
+    int offset;
+    int whence;
+    int offset_new;
+    struct file *f;
+
+    // get the arguments respectively
+    if (argfd(0, &fd, &f) < 0 || argint(1, &offset) < 0 || argint(2, &whence) < 0) 
+        return -1;
+
+    if (f->ip->type != T_FILE) // check whether it's a normal file
+        return -1;
+
+    if (whence == SEEK_CUR) {
+        offset_new = f->off + offset;
+    } else if (whence == SEEK_SET) {
+        offset_new = offset;
+    } else if (whence == SEEK_END) {
+        offset_new = f->ip->size + offset;
+    } else {
+        return -1;
+    }
+
+    if (offset_new < 0 || offset_new > MAXFILE * BSIZE) 
+        return -1;
+
+    if (offset_new > f->ip->size) {
+        int zerofill = offset_new - f->ip->size;
+        int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+        char *zero = (char *) kalloc();
+        char *z = zero;
+        for (int i = 0; i < max; i++) 
+            *(z++) = '\0';
+
+        int index = 0;
+        int step;
+        while (index < zerofill) {
+            int chunk = zerofill - index;
+            if (chunk > max) chunk = max;
+
+            begin_op();
+            ilock(f->ip);
+            if ((step = writei(f->ip, 0, (uint64)zero, f->off, chunk)) > 0) {
+                f->off += step;
+            }
+            iunlock(f->ip);
+            end_op();
+
+            if (step != chunk) {
+                panic("file not writen correctly");
+            }
+            index += step;
+        }
+        kfree(zero);
+    }
+
+    f->off = offset_new;
+
+    return offset_new;
+}
